@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronUp,
   Tag,
+  Clock,
 } from "lucide-react";
 
 // ── Types (mirroring API response) ───────────────────────────────────────────
@@ -34,6 +35,7 @@ interface MatchedIssue {
     title: string;
     url: string;
     body: string;
+    createdAt: string;
     labels: string[];
     repoName: string;
     repoUrl: string;
@@ -262,6 +264,16 @@ export default function DashboardClient({ user }: Props) {
                       <span className="flex items-center gap-0.5">
                         <MessageSquare className="h-3 w-3" /> {m.issue.commentCount}
                       </span>
+                      {m.issue.createdAt && (
+                        <span className="flex items-center gap-0.5">
+                          <Clock className="h-3 w-3" />
+                          {new Date(m.issue.createdAt).toLocaleDateString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </span>
+                      )}
                       {m.issue.repoLanguage && (
                         <span className="rounded-md bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300">
                           {m.issue.repoLanguage}
@@ -332,8 +344,8 @@ export default function DashboardClient({ user }: Props) {
         ) : (
           /* Skeleton cards */
           <>
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[1, 2, 3].map((i) => (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div key={i} className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 opacity-30">
                   <div className="mb-3 h-4 w-3/4 rounded-md bg-zinc-700" />
                   <div className="mb-4 h-3 w-1/2 rounded-md bg-zinc-800" />

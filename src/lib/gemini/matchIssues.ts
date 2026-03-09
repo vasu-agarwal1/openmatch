@@ -95,13 +95,14 @@ CANDIDATE ISSUES (JSON array):
 ${JSON.stringify(issueList, null, 2)}
 
 TASK:
-Pick the 5 issues best suited for this developer. Consider:
+Pick the top 10 issues best suited for this developer (or fewer if less are available). Consider:
 - Language overlap with the developer's skills
 - Issue complexity vs the developer's experience level
 - Repo popularity (stars) and community activity
 - How well the issue description aligns with the developer's background
+- Recency — prefer recently created issues
 
-Return ONLY a valid JSON array (no markdown, no explanation) with exactly 5 objects:
+Return ONLY a valid JSON array (no markdown, no explanation) with up to 10 objects:
 [
   { "idx": <number>, "score": <0-100>, "reason": "<one sentence>" },
   ...
