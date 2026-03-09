@@ -89,15 +89,20 @@ interface GHSearchResponse {
 export async function fetchIssuePool(
   accessToken: string,
   languages: string[],
-  perLanguage = 10,
+  perLanguage = 20,
 ): Promise<GitHubIssue[]> {
-  // Take only the top 3 languages to stay within rate limits
-  const topLangs = languages.slice(0, 3);
+  // Take top 5 languages for a wider pool
+  const topLangs = languages.slice(0, 5);
+
+  // Only issues created in the last 90 days
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10); // YYYY-MM-DD
 
   const allIssues: GitHubIssue[] = [];
 
   for (const lang of topLangs) {
-    const searchQ = `label:"good first issue","help wanted" language:${lang} state:open sort:reactions-+1-desc`;
+    const searchQ = `label:"good first issue","help wanted" language:${lang} state:open created:>${since} sort:created-desc`;
 
     const res = await fetch(GITHUB_GRAPHQL, {
       method: "POST",
@@ -140,9 +145,16 @@ export async function fetchIssuePool(
 
   // Deduplicate by issue URL
   const seen = new Set<string>();
-  return allIssues.filter((issue) => {
+  const unique = allIssues.filter((issue) => {
     if (seen.has(issue.url)) return false;
     seen.add(issue.url);
     return true;
   });
+
+  // Sort newest first
+  unique.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  return unique;
 }

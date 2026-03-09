@@ -45,9 +45,9 @@ export async function POST() {
       { upsert: true, returnDocument: "after" },
     );
 
-    // 4. Fetch issue pool based on user's languages
+    // 4. Fetch issue pool based on user's languages (20 per lang, up to 5 langs)
     const languageNames = profileData.languages.map((l) => l.name);
-    const issues = await fetchIssuePool(accessToken, languageNames, 10);
+    const issues = await fetchIssuePool(accessToken, languageNames, 20);
 
     if (issues.length === 0) {
       return NextResponse.json({
@@ -60,12 +60,14 @@ export async function POST() {
     // 5. Rank with Gemini
     const ranked = await rankIssues(profileData, issues);
 
-    // 6. Generate guides for top 3
-    const top = ranked.slice(0, 3);
+    // 6. Generate guides for top 5 (lazy-load the rest on the client)
     const withGuides = await Promise.all(
-      top.map(async (match) => ({
+      ranked.map(async (match, i) => ({
         ...match,
-        guide: await generateGuide(profileData, match.issue),
+        guide:
+          i < 5
+            ? await generateGuide(profileData, match.issue)
+            : undefined,
       })),
     );
 
