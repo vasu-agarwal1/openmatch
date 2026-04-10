@@ -38,13 +38,76 @@ async function geminiPost(body: object): Promise<Response> {
   let lastRes: Response | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     lastRes = await fetch(url, opts);
-    if (lastRes.status !== 429) return lastRes;
-    // wait before retrying
-    const delay = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
-    console.warn(`Gemini 429 – retrying in ${delay / 1000}s (attempt ${attempt + 1}/3)`);
+    if (lastRes.status !== 429 && lastRes.status !== 503) return lastRes;
+    // wait before retrying (prefer server-provided retry delay when available)
+    let delay = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
+    try {
+      const json = await lastRes.clone().json();
+      const retryInfo = json?.error?.details?.find(
+        (d: { "@type"?: string }) =>
+          d?.["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+      );
+      const retryDelay = retryInfo?.retryDelay as string | undefined;
+      if (retryDelay) {
+        const seconds = Number.parseFloat(retryDelay.replace("s", ""));
+        if (!Number.isNaN(seconds) && seconds > 0) {
+          delay = Math.round(seconds * 1000);
+        }
+      }
+    } catch {
+      // ignore parse issues, keep exponential backoff
+    }
+    console.warn(
+      `Gemini ${lastRes.status} – retrying in ${delay / 1000}s (attempt ${attempt + 1}/3)`,
+    );
     await new Promise((r) => setTimeout(r, delay));
   }
   return lastRes!;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function heuristicRankIssues(
+  profile: GitHubProfileData,
+  issues: GitHubIssue[],
+  limit = 10,
+): MatchedIssue[] {
+  const topLanguages = new Set(
+    profile.languages.slice(0, 5).map((l) => l.name.toLowerCase()),
+  );
+
+  const ranked = issues.map((issue) => {
+    let score = 30;
+
+    if (topLanguages.has(issue.repoLanguage.toLowerCase())) score += 25;
+
+    const labelsLower = issue.labels.map((l) => l.toLowerCase());
+    if (labelsLower.some((l) => l.includes("good first issue"))) score += 20;
+    if (labelsLower.some((l) => l.includes("help wanted"))) score += 8;
+
+    const daysOld =
+      (Date.now() - new Date(issue.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysOld <= 14) score += 12;
+    else if (daysOld <= 30) score += 8;
+    else if (daysOld <= 90) score += 4;
+
+    score += clamp(Math.log10(issue.repoStars + 1) * 6, 0, 12);
+    score += clamp(Math.log10(issue.commentCount + issue.reactionCount + 1) * 3, 0, 6);
+
+    const roundedScore = Math.round(clamp(score, 0, 100));
+    const reason =
+      `Matched via language fit (${issue.repoLanguage || "unknown"}), issue freshness, and repository activity.`;
+
+    return {
+      issue,
+      score: roundedScore,
+      reason,
+    };
+  });
+
+  return ranked.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -66,6 +129,8 @@ export async function rankIssues(
   profile: GitHubProfileData,
   issues: GitHubIssue[],
 ): Promise<MatchedIssue[]> {
+  const candidateIssues = issues.slice(0, 40);
+
   // Build a concise profile summary for the prompt
   const profileSummary = [
     `GitHub: @${profile.githubLogin}`,
@@ -76,7 +141,7 @@ export async function rankIssues(
   ].join("\n");
 
   // Trim each issue to essentials so the prompt stays small
-  const issueList = issues.map((iss, i) => ({
+  const issueList = candidateIssues.map((iss, i) => ({
     idx: i,
     title: iss.title,
     repo: iss.repoName,
@@ -114,12 +179,21 @@ Sort by score descending. Respond with the JSON array only.`;
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 16384,
+      maxOutputTokens: 1024,
     },
   });
 
   if (!res.ok) {
     const body = await res.text();
+    if (
+      res.status === 429 ||
+      res.status === 503 ||
+      body.includes("RESOURCE_EXHAUSTED") ||
+      body.includes("UNAVAILABLE")
+    ) {
+      console.warn("Gemini quota reached, using heuristic ranking fallback.");
+      return heuristicRankIssues(profile, issues, 10);
+    }
     throw new Error(`Gemini API error ${res.status}: ${body}`);
   }
 
@@ -160,7 +234,7 @@ Sort by score descending. Respond with the JSON array only.`;
 
   if (!jsonMatch) {
     console.error("Gemini returned non-JSON:", rawText.slice(0, 300));
-    return [];
+    return heuristicRankIssues(profile, issues, 10);
   }
 
   let ranked: Array<{ idx: number; score: number; reason: string }>;
@@ -168,16 +242,17 @@ Sort by score descending. Respond with the JSON array only.`;
     ranked = JSON.parse(jsonMatch[0]);
   } catch {
     console.error("Failed to parse Gemini ranking:", jsonMatch[0].slice(0, 300));
-    return [];
+    return heuristicRankIssues(profile, issues, 10);
   }
 
   return ranked
-    .filter((r) => r.idx >= 0 && r.idx < issues.length)
+    .filter((r) => r.idx >= 0 && r.idx < candidateIssues.length)
     .map((r) => ({
-      issue: issues[r.idx],
+      issue: candidateIssues[r.idx],
       score: r.score,
       reason: r.reason,
-    }));
+    }))
+    .slice(0, 10);
 }
 
 // ── 2. Generate getting-started guide ────────────────────────────────────────

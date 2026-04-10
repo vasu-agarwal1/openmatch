@@ -83,13 +83,13 @@ export async function POST() {
         const ranked = await rankIssues(profileData, issues);
         send({ step: 4, done: true, matchCount: ranked.length });
 
-        // Step 5: Generate guides
+        // Step 5: Generate guides (top 2 only to keep Gemini usage low)
         send({ step: 5, label: "Generating getting-started guides…" });
         const withGuides = await Promise.all(
           ranked.map(async (match, i) => ({
             ...match,
             guide:
-              i < 5
+              i < 2
                 ? await generateGuide(profileData, match.issue)
                 : undefined,
           })),
