@@ -1,14 +1,6 @@
 "use client";
 
-/**
- * DashboardClient — interactive dashboard body.
- *
- * Features:
- *  - Step-by-step progress bar during analysis
- *  - Markdown rendering for AI guides
- *  - Bookmark/save issues
- *  - Load last analysis from history on mount
- */
+
 
 import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
